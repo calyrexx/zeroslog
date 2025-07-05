@@ -1,4 +1,4 @@
-package test
+package zeroslog_test
 
 import (
 	"errors"
@@ -119,6 +119,59 @@ func BenchmarkLogrus_Error(b *testing.B) {
 			"method":   fullMethod,
 			"duration": dur,
 		}).Error("err", errTest)
+	})
+}
+
+func BenchmarkSlogJSON_Info(b *testing.B) {
+	slogLogger := slog.New(
+		slog.NewJSONHandler(io.Discard, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		}),
+	)
+
+	benchLog(b, func() {
+		slogLogger.Info("gRPC call succeeded",
+			"method", fullMethod,
+			"duration", dur,
+			"version", version,
+			"someFloat", someFloat,
+		)
+	})
+}
+
+func BenchmarkZeroSLogJSON_Info(b *testing.B) {
+	logger := slog.New(zeroslog.New(
+		zeroslog.WithTimeFormat("2006-01-02 15:04:05.000 -07:00"),
+		zeroslog.WithOutput(io.Discard),
+		zeroslog.WithJSON(),
+		zeroslog.WithColors(),
+		zeroslog.WithMinLevel(0),
+	))
+
+	benchLog(b, func() {
+		logger.Info("gRPC call succeeded",
+			"method", fullMethod,
+			"duration", dur,
+			"version", version,
+			"someFloat", someFloat,
+		)
+	})
+}
+
+func BenchmarkLogrusJSON_Info(b *testing.B) {
+	l := logrus.New()
+	l.SetOutput(io.Discard)
+	l.SetFormatter(&logrus.JSONFormatter{
+		TimestampFormat: "2006-01-02 15:04:05.000 -07:00",
+	})
+
+	benchLog(b, func() {
+		l.WithFields(logrus.Fields{
+			"method":    fullMethod,
+			"duration":  dur,
+			"version":   version,
+			"someFloat": someFloat,
+		}).Info("gRPC call succeeded")
 	})
 }
 

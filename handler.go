@@ -3,6 +3,7 @@ package zeroslog
 import (
 	"bytes"
 	"context"
+	"github.com/bytedance/sonic"
 	"io"
 	"log/slog"
 	"os"
@@ -15,12 +16,19 @@ type Handler struct {
 	timeFmt  string
 	minLevel slog.Level
 	color    bool
+	json     bool
 	mu       sync.Mutex
 	attrs    []slog.Attr
 	groups   []string
 }
 
 type Option func(*Handler)
+
+func WithJSON() Option {
+	return func(h *Handler) {
+		h.json = true
+	}
+}
 
 func WithTimeFormat(format string) Option {
 	return func(h *Handler) {
@@ -52,6 +60,7 @@ func New(opts ...Option) *Handler {
 		timeFmt:  time.RFC3339,
 		minLevel: slog.LevelInfo,
 		color:    false,
+		json:     false,
 	}
 	for _, opt := range opts {
 		opt(h)
@@ -70,6 +79,13 @@ func (h *Handler) Handle(_ context.Context, r slog.Record) error {
 		return nil
 	}
 
+	if h.json {
+		return h.handleJSON(r)
+	}
+	return h.handleText(r)
+}
+
+func (h *Handler) handleText(r slog.Record) error {
 	buf := bufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 
@@ -139,6 +155,43 @@ func (h *Handler) Handle(_ context.Context, r slog.Record) error {
 
 	bufPool.Put(buf)
 	return nil
+}
+
+func (h *Handler) handleJSON(r slog.Record) error {
+	logMap := make(map[string]any)
+
+	logMap["time"] = r.Time.Format(h.timeFmt)
+	logMap["level"] = chooseLevelStr(r.Level, false)
+	logMap["message"] = r.Message
+
+	if len(h.groups) > 0 {
+		logMap["context"] = h.groups
+	}
+
+	for _, a := range h.attrs {
+		logMap[a.Key] = a.Value.Any()
+	}
+
+	r.Attrs(func(a slog.Attr) bool {
+		logMap[a.Key] = a.Value.Any()
+		return true
+	})
+
+	buf := bufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bufPool.Put(buf)
+
+	encoder := sonic.ConfigFastest.NewEncoder(buf)
+	if err := encoder.Encode(logMap); err != nil {
+		return err
+	}
+
+	buf.WriteByte('\n')
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	_, err := h.out.Write(buf.Bytes())
+	return err
 }
 
 func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
