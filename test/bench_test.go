@@ -1,4 +1,4 @@
-package test
+package zeroslog_test
 
 import (
 	"errors"
@@ -7,16 +7,15 @@ import (
 	"log/slog"
 	"testing"
 	"time"
-
-	"github.com/sirupsen/logrus"
 )
 
 var (
-	fullMethod = "/conveyor.NotificationService/GetAmountUnreadNotifications"
+	fullMethod = "/test.TestService/GetUser"
 	dur        = 320 * time.Microsecond
 	version    = 21
 	someFloat  = 123.123
 	errTest    = errors.New("this is an error")
+	timeFormat = "2006-01-02 15:04:05.000 -07:00"
 )
 
 func BenchmarkSlog_Info(b *testing.B) {
@@ -38,10 +37,10 @@ func BenchmarkSlog_Info(b *testing.B) {
 
 func BenchmarkZeroSLog_Info(b *testing.B) {
 	logger := slog.New(zeroslog.New(
-		zeroslog.WithTimeFormat("2006-01-02 15:04:05.000 -07:00"),
+		zeroslog.WithTimeFormat(timeFormat),
 		zeroslog.WithOutput(io.Discard),
 		zeroslog.WithColors(),
-		zeroslog.WithMinLevel(0),
+		zeroslog.WithMinLevel(slog.LevelInfo),
 	))
 
 	benchLog(b, func() {
@@ -51,25 +50,6 @@ func BenchmarkZeroSLog_Info(b *testing.B) {
 			"version", version,
 			"someFloat", someFloat,
 		)
-	})
-}
-
-func BenchmarkLogrus_Info(b *testing.B) {
-	l := logrus.New()
-	l.SetOutput(io.Discard)
-	l.SetFormatter(&logrus.TextFormatter{
-		ForceColors:     true,
-		FullTimestamp:   true,
-		TimestampFormat: "2006-01-02 15:04:05.000 -07:00",
-	})
-
-	benchLog(b, func() {
-		l.WithFields(logrus.Fields{
-			"method":    fullMethod,
-			"duration":  dur,
-			"version":   version,
-			"someFloat": someFloat,
-		}).Info("gRPC call succeeded")
 	})
 }
 
@@ -91,9 +71,10 @@ func BenchmarkSlog_Error(b *testing.B) {
 
 func BenchmarkZeroSLog_Error(b *testing.B) {
 	logger := slog.New(zeroslog.New(
-		zeroslog.WithTimeFormat("2006-01-02 15:04:05.000 -07:00"),
+		zeroslog.WithTimeFormat(timeFormat),
 		zeroslog.WithOutput(io.Discard),
 		zeroslog.WithColors(),
+		zeroslog.WithMinLevel(slog.LevelInfo),
 	))
 
 	benchLog(b, func() {
@@ -105,20 +86,36 @@ func BenchmarkZeroSLog_Error(b *testing.B) {
 	})
 }
 
-func BenchmarkLogrus_Error(b *testing.B) {
-	l := logrus.New()
-	l.SetOutput(io.Discard)
-	l.SetFormatter(&logrus.TextFormatter{
-		ForceColors:     true,
-		FullTimestamp:   true,
-		TimestampFormat: "2006-01-02 15:04:05.000 -07:00",
-	})
+func BenchmarkSlog_Groups(b *testing.B) {
+	slogLogger := slog.New(
+		slog.NewTextHandler(io.Discard, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		}),
+	)
 
 	benchLog(b, func() {
-		l.WithFields(logrus.Fields{
-			"method":   fullMethod,
-			"duration": dur,
-		}).Error("err", errTest)
+		slogLogger.Info("gRPC call succeeded",
+			"method", fullMethod,
+			"duration", dur,
+			slog.Group("user", "name", "John Doe", "id", 123456789),
+		)
+	})
+}
+
+func BenchmarkZeroSLog_Groups(b *testing.B) {
+	logger := slog.New(zeroslog.New(
+		zeroslog.WithTimeFormat(timeFormat),
+		zeroslog.WithOutput(io.Discard),
+		zeroslog.WithColors(),
+		zeroslog.WithMinLevel(slog.LevelInfo),
+	))
+
+	benchLog(b, func() {
+		logger.Info("gRPC call succeeded",
+			"method", fullMethod,
+			"duration", dur,
+			slog.Group("user", "name", "John Doe", "id", 123456789),
+		)
 	})
 }
 

@@ -69,11 +69,7 @@ func appendVal(b *bytes.Buffer, v any) {
 	case error:
 		b.WriteString(vv.Error())
 	case bool:
-		if vv {
-			b.WriteByte('1')
-		} else {
-			b.WriteByte('0')
-		}
+		b.WriteString(strconv.FormatBool(vv))
 	default:
 		jsonBytes, err := sonic.Marshal(v)
 		if err == nil {
@@ -148,4 +144,19 @@ func stringsContainsSpace(s string) bool {
 		}
 	}
 	return false
+}
+
+func writeQualifiedKey(buf *bytes.Buffer, groups []string, key string) {
+	if len(groups) > 0 {
+		for i, g := range groups {
+			if i > 0 {
+				buf.WriteByte('.')
+			}
+			buf.WriteString(g)
+		}
+		if key != "" {
+			buf.WriteByte('.')
+		}
+	}
+	buf.WriteString(key)
 }

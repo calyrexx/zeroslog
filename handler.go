@@ -90,44 +90,14 @@ func (h *Handler) Handle(_ context.Context, r slog.Record) error {
 	buf.WriteString(r.Message)
 	padRunes(buf, r.Message, 50)
 
-	// ----- groups -----
-	if len(h.groups) > 0 {
-		buf.WriteString("[")
-		for i, g := range h.groups {
-			if i > 0 {
-				buf.WriteString(".")
-			}
-			buf.WriteString(g)
-		}
-		buf.Write([]byte{']', ' '})
-	}
-
 	// ----- previous attrs -----
 	for _, a := range h.attrs {
-		if h.color {
-			buf.WriteString(levelColorCode(r.Level))
-			buf.WriteString(a.Key)
-			buf.WriteString(cReset)
-		} else {
-			buf.WriteString(a.Key)
-		}
-		buf.WriteByte('=')
-		appendVal(buf, a.Value.Any())
-		buf.WriteByte(' ')
+		h.writeAttr(buf, r.Level, h.groups, a)
 	}
 
 	// ----- attrs -----
 	r.Attrs(func(a slog.Attr) bool {
-		if h.color {
-			buf.WriteString(levelColorCode(r.Level))
-			buf.WriteString(a.Key)
-			buf.WriteString(cReset)
-		} else {
-			buf.WriteString(a.Key)
-		}
-		buf.WriteByte('=')
-		appendVal(buf, a.Value.Any())
-		buf.WriteByte(' ')
+		h.writeAttr(buf, r.Level, h.groups, a)
 		return true
 	})
 
@@ -139,6 +109,28 @@ func (h *Handler) Handle(_ context.Context, r slog.Record) error {
 
 	bufPool.Put(buf)
 	return nil
+}
+
+func (h *Handler) writeAttr(buf *bytes.Buffer, level slog.Level, groups []string, a slog.Attr) {
+	switch a.Value.Kind() {
+	case slog.KindGroup:
+		groups = append(groups, a.Key)
+		for _, ga := range a.Value.Group() {
+			h.writeAttr(buf, level, groups, ga)
+		}
+		groups = groups[:len(groups)-1]
+	default:
+		if h.color {
+			buf.WriteString(levelColorCode(level))
+			writeQualifiedKey(buf, groups, a.Key)
+			buf.WriteString(cReset)
+		} else {
+			writeQualifiedKey(buf, groups, a.Key)
+		}
+		buf.WriteByte('=')
+		appendVal(buf, a.Value.Any())
+		buf.WriteByte(' ')
+	}
 }
 
 func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
