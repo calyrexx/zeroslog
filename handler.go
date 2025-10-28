@@ -3,6 +3,7 @@ package zeroslog
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -56,6 +57,7 @@ func New(opts ...Option) *Handler {
 	for _, opt := range opts {
 		opt(h)
 	}
+
 	return h
 }
 
@@ -63,27 +65,41 @@ func (h *Handler) Enabled(_ context.Context, l slog.Level) bool {
 	return l >= h.minLevel
 }
 
-var bg = context.Background()
-
-func (h *Handler) Handle(_ context.Context, r slog.Record) error {
-	if !h.Enabled(bg, r.Level) {
+func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
+	if !h.Enabled(ctx, r.Level) {
 		return nil
 	}
 
-	buf := bufPool.Get().(*bytes.Buffer)
+	v := bufPool.Get()
+	buf, ok := v.(*bytes.Buffer)
+
+	if !ok || buf == nil {
+		buf = new(bytes.Buffer)
+	}
+
 	buf.Reset()
+	defer bufPool.Put(buf)
 
 	levelStr := chooseLevelStr(r.Level, h.color)
 	buf.WriteString(levelStr)
 
 	// ----- timestamp -----
+	tv := tsPool.Get()
+	tsPtr, ok := tv.(*[]byte)
+
+	if !ok || tsPtr == nil {
+		b := make([]byte, 0, 32)
+		tsPtr = &b
+	}
+	defer tsPool.Put(tsPtr)
+
 	buf.WriteByte('[')
-	tsPtr := tsPool.Get().(*[]byte)
+
 	tsBuf := (*tsPtr)[:0]
 	tsBuf = r.Time.AppendFormat(tsBuf, h.timeFmt)
 	buf.Write(tsBuf)
 	*tsPtr = tsBuf
-	tsPool.Put(tsPtr)
+
 	buf.Write([]byte{']', ' '})
 
 	// ----- message -----
@@ -98,16 +114,20 @@ func (h *Handler) Handle(_ context.Context, r slog.Record) error {
 	// ----- attrs -----
 	r.Attrs(func(a slog.Attr) bool {
 		h.writeAttr(buf, r.Level, h.groups, a)
+
 		return true
 	})
 
 	buf.WriteByte('\n')
 
 	h.mu.Lock()
-	_, _ = h.out.Write(buf.Bytes())
+	_, err := h.out.Write(buf.Bytes())
 	h.mu.Unlock()
 
-	bufPool.Put(buf)
+	if err != nil {
+		return fmt.Errorf("io.Writer.Write error: %w", err)
+	}
+
 	return nil
 }
 
@@ -118,7 +138,6 @@ func (h *Handler) writeAttr(buf *bytes.Buffer, level slog.Level, groups []string
 		for _, ga := range a.Value.Group() {
 			h.writeAttr(buf, level, groups, ga)
 		}
-		groups = groups[:len(groups)-1]
 	default:
 		if h.color {
 			buf.WriteString(levelColorCode(level))
@@ -127,6 +146,7 @@ func (h *Handler) writeAttr(buf *bytes.Buffer, level slog.Level, groups []string
 		} else {
 			writeQualifiedKey(buf, groups, a.Key)
 		}
+
 		buf.WriteByte('=')
 		appendVal(buf, a.Value.Any())
 		buf.WriteByte(' ')
@@ -137,6 +157,7 @@ func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	newAttrs := make([]slog.Attr, 0, len(h.attrs)+len(attrs))
 	newAttrs = append(newAttrs, h.attrs...)
 	newAttrs = append(newAttrs, attrs...)
+
 	return &Handler{
 		out:      h.out,
 		timeFmt:  h.timeFmt,
@@ -152,6 +173,7 @@ func (h *Handler) WithGroup(group string) slog.Handler {
 	if group != "" {
 		newGroups = append(newGroups, group)
 	}
+
 	return &Handler{
 		out:      h.out,
 		timeFmt:  h.timeFmt,

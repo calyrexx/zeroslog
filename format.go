@@ -2,11 +2,12 @@ package zeroslog
 
 import (
 	"bytes"
-	"github.com/bytedance/sonic"
 	"log/slog"
 	"strconv"
 	"time"
 	"unicode/utf8"
+
+	"github.com/bytedance/sonic"
 )
 
 const (
@@ -41,8 +42,26 @@ var (
 func appendVal(b *bytes.Buffer, v any) {
 	if v == nil {
 		b.WriteString("nil")
+
 		return
 	}
+
+	if handled := appendSimple(b, v); handled {
+		return
+	}
+
+	if handled := appendNumeric(b, v); handled {
+		return
+	}
+
+	if jsonBytes, err := sonic.Marshal(v); err == nil {
+		b.Write(jsonBytes)
+	} else {
+		b.WriteString("<unsupported>")
+	}
+}
+
+func appendSimple(b *bytes.Buffer, v any) bool {
 	switch vv := v.(type) {
 	case string:
 		if stringsContainsSpace(vv) {
@@ -52,36 +71,59 @@ func appendVal(b *bytes.Buffer, v any) {
 		} else {
 			b.WriteString(vv)
 		}
-	case int:
-		var num [32]byte
-		b.Write(strconv.AppendInt(num[:0], int64(vv), 10))
-	case int64:
-		var num [64]byte
-		b.Write(strconv.AppendInt(num[:0], vv, 10))
-	case time.Duration:
-		b.WriteString(vv.String())
-	case float64:
-		var num [64]byte
-		b.Write(strconv.AppendFloat(num[:0], vv, 'f', -1, 64))
-	case float32:
-		var num [32]byte
-		b.Write(strconv.AppendFloat(num[:0], float64(vv), 'f', -1, 64))
-	case error:
-		b.WriteString(vv.Error())
+
+		return true
 	case bool:
 		b.WriteString(strconv.FormatBool(vv))
+
+		return true
+	case error:
+		b.WriteString(vv.Error())
+
+		return true
+	case time.Duration:
+		b.WriteString(vv.String())
+
+		return true
 	default:
-		jsonBytes, err := sonic.Marshal(v)
-		if err == nil {
-			b.Write(jsonBytes)
-		} else {
-			b.WriteString("<unsupported>")
-		}
+		return false
+	}
+}
+
+func appendNumeric(b *bytes.Buffer, v any) bool {
+	switch vv := v.(type) {
+	case int:
+		var num [32]byte
+
+		b.Write(strconv.AppendInt(num[:0], int64(vv), 10))
+
+		return true
+	case int64:
+		var num [64]byte
+
+		b.Write(strconv.AppendInt(num[:0], vv, 10))
+
+		return true
+	case float32:
+		var num [32]byte
+
+		b.Write(strconv.AppendFloat(num[:0], float64(vv), 'f', -1, 64))
+
+		return true
+	case float64:
+		var num [64]byte
+
+		b.Write(strconv.AppendFloat(num[:0], vv, 'f', -1, 64))
+
+		return true
+	default:
+		return false
 	}
 }
 
 func padRunes(buf *bytes.Buffer, msg string, width int) {
 	msgLen := utf8.RuneCountInString(msg)
+
 	switch {
 	case msgLen < width:
 		n := width - msgLen
@@ -103,21 +145,25 @@ func chooseLevelStr(l slog.Level, color bool) string {
 		if color {
 			return lvlColor[1]
 		}
+
 		return lvlPlain[1]
 	case slog.LevelError:
 		if color {
 			return lvlColor[3]
 		}
+
 		return lvlPlain[3]
 	case slog.LevelWarn:
 		if color {
 			return lvlColor[2]
 		}
+
 		return lvlPlain[2]
 	default:
 		if color {
 			return lvlColor[0]
 		}
+
 		return lvlPlain[0]
 	}
 }
@@ -143,6 +189,7 @@ func stringsContainsSpace(s string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -152,11 +199,14 @@ func writeQualifiedKey(buf *bytes.Buffer, groups []string, key string) {
 			if i > 0 {
 				buf.WriteByte('.')
 			}
+
 			buf.WriteString(g)
 		}
+
 		if key != "" {
 			buf.WriteByte('.')
 		}
 	}
+
 	buf.WriteString(key)
 }
